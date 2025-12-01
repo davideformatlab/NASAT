@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NASA • Artemis Mission Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --color-primary: #38bdf8; /* Sky 400 */
+      --color-accent: #f472b6;  /* Pink 400 */
+      --bg-dark: #020617;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      overflow-x: hidden;
+      cursor: crosshair; /* Tactical feel */
+    }
+
+    /* === TYPOGRAPHY === */
+    .font-hud { font-family: 'Rajdhani', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* === BACKGROUND & FX === */
+    #canvas-container {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* CRT Scanline Effect */
+    .scanlines {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1));
+      background-size: 100% 4px;
+      z-index: 50;
+      pointer-events: none;
+      opacity: 0.6;
+    }
+
+    /* Vignette */
+    .vignette {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: radial-gradient(circle, transparent 60%, rgba(2,6,23,0.9) 100%);
+      z-index: 49;
+      pointer-events: none;
+    }
+
+    /* === GLASS HUD COMPONENTS === */
+    .hud-panel {
+      background: rgba(15, 23, 42, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      box-shadow: 0 0 20px rgba(2, 6, 23, 0.5);
+    }
+
+    .hud-border-glow {
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.1), inset 0 0 20px rgba(56, 189, 248, 0.05);
+    }
+
+    /* === SCROLLYTELLING ELEMENTS === */
+    .phase-card {
+      position: relative;
+      padding-left: 2rem;
+      border-left: 2px solid rgba(71, 85, 105, 0.5);
+      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      opacity: 0.3;
+      transform: translateX(-20px);
+      filter: blur(2px);
+    }
+
+    .phase-card.active {
+      opacity: 1;
+      border-left-color: var(--color-primary);
+      transform: translateX(0);
+      filter: blur(0);
+    }
+
+    .phase-card::before {
+      content: '';
+      position: absolute;
+      left: -6px; top: 0;
+      width: 10px; height: 10px;
+      background: var(--bg-dark);
+      border: 2px solid rgba(71, 85, 105, 0.5);
+      border-radius: 50%;
+      transition: all 0.5s ease;
+    }
+
+    .phase-card.active::before {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      box-shadow: 0 0 15px var(--color-primary);
+    }
+
+    /* === CHART ANIMATIONS === */
+    .bar-rect {
+      transition: height 1s cubic-bezier(0.34, 1.56, 0.64, 1), fill 0.5s ease;
+      transform-origin: bottom;
+    }
+    
+    .data-text {
+      font-variant-numeric: tabular-nums;
+    }
+
+  </style>
+</head>
+<body class="selection:bg-sky-500/30 selection:text-sky-200">
+
+  <div id="canvas-container"><canvas id="starfield"></canvas></div>
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+
+  <header class="fixed top-0 inset-x-0 z-40 border-b border-sky-900/30 bg-slate-950/80 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto h-16 px-4 flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <div class="w-2 h-2 bg-sky-500 rounded-full animate-pulse shadow-[0_0_10px_#0ea5e9]"></div>
+        <h1 class="font-hud font-bold text-2xl tracking-widest text-sky-100">ARTEMIS <span class="text-sky-500">I</span></h1>
+      </div>
+      
+      <div class="hidden md:flex gap-8 font-mono text-xs text-sky-400/70">
+        <div>SYS: <span class="text-sky-200">NOMINAL</span></div>
+        <div>MET: <span class="text-sky-200" id="met-timer">00:00:00</span></div>
+        <div>LINK: <span class="text-green-400">ESTABLISHED</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="relative z-10 pt-32 pb-32 max-w-7xl mx-auto px-4 grid lg:grid-cols-2 gap-20">
+    
+    <div class="space-y-[60vh]"> <div class="phase-card active" data-phase="launch">
+        <span class="font-mono text-xs text-sky-500 mb-2 block tracking-widest">PHASE 01 // T-MINUS 00:00:00</span>
+        <h2 class="font-hud text-5xl font-bold mb-4 text-white">LUNAR INJECTION</h2>
+        <p class="text-slate-400 text-lg leading-relaxed">
+          The Space Launch System (SLS) generates 8.8 million pounds of thrust. 
+          Following Earth orbit insertion, the ICPS performs the Trans-Lunar Injection (TLI) burn, 
+          propelling Orion out of Earth's gravity well.
+        </p>
+        <div class="mt-6 p-4 border border-sky-900/50 bg-sky-900/10 rounded font-mono text-xs text-sky-300">
+          > THRUST_VECTOR: 104%<br>
+          > APOGEE_TARGET: 384,400 KM
+        </div>
+      </div>
+
+      <div class="phase-card" data-phase="orbit">
+        <span class="font-mono text-xs text-fuchsia-500 mb-2 block tracking-widest">PHASE 02 // DISTANT RETROGRADE ORBIT</span>
+        <h2 class="font-hud text-5xl font-bold mb-4 text-white">ORBITAL INSERTION</h2>
+        <p class="text-slate-400 text-lg leading-relaxed">
+          Orion enters a stable Distant Retrograde Orbit (DRO) around the Moon. 
+          This highly stable orbit allows the spacecraft to remain in deep space with minimal fuel consumption 
+          while validating deep space communication systems.
+        </p>
+        <div class="mt-6 p-4 border border-fuchsia-900/50 bg-fuchsia-900/10 rounded font-mono text-xs text-fuchsia-300">
+          > ALTITUDE: 70,000 KM (LUNAR)<br>
+          > DRO_STABILITY: CONFIRMED
+        </div>
+      </div>
+
+      <div class="phase-card" data-phase="surface">
+        <span class="font-mono text-xs text-indigo-400 mb-2 block tracking-widest">PHASE 03 // SURFACE OPERATIONS</span>
+        <h2 class="font-hud text-5xl font-bold mb-4 text-white">THE LANDING</h2>
+        <p class="text-slate-400 text-lg leading-relaxed">
+          HLS (Human Landing System) separates. Powered descent initiation. 
+          LIDAR scans for hazards. Touchdown at the Lunar South Pole, a region of eternal light 
+          and deep shadow, rich in water ice.
+        </p>
+        <div class="mt-6 p-4 border border-indigo-900/50 bg-indigo-900/10 rounded font-mono text-xs text-indigo-300">
+          > SURFACE_EVA: ACTIVE<br>
+          > SAMPLE_COLLECTION: IN PROGRESS
+        </div>
+      </div>
+
+      <div class="phase-card" data-phase="return">
+        <span class="font-mono text-xs text-orange-400 mb-2 block tracking-widest">PHASE 04 // RE-ENTRY</span>
+        <h2 class="font-hud text-5xl font-bold mb-4 text-white">EARTH RETURN</h2>
+        <p class="text-slate-400 text-lg leading-relaxed">
+          Skip-entry technique initiated. Heat shield endures 5,000°F (2,760°C). 
+          Orion splashes down in the Pacific Ocean, marking the completion of the Artemis I certification for human flight.
+        </p>
+        <div class="mt-6 p-4 border border-orange-900/50 bg-orange-900/10 rounded font-mono text-xs text-orange-300">
+          > VELOCITY: MACH 32<br>
+          > PARACHUTES: DEPLOYED
+        </div>
+      </div>
+
+    </div>
+
+    <div class="hidden lg:block relative">
+      <div class="sticky top-32 w-full">
+        
+        <div class="hud-panel rounded-xl p-6 hud-border-glow">
+          <div class="flex justify-between items-end mb-8">
+            <div>
+              <h3 class="font-hud text-xl text-white">TELEMETRY_MAIN</h3>
+              <p class="font-mono text-xs text-sky-500">LIVE DATA STREAM</p>
+            </div>
+            <div class="font-mono text-xs text-slate-500 text-right">
+              ID: ART-01<br>
+              CHAN: SECURE
+            </div>
+          </div>
+
+          <div class="relative h-64 w-full">
+            <svg class="w-full h-full overflow-visible" viewBox="0 0 300 150">
+              <g stroke="rgba(56, 189, 248, 0.1)" stroke-width="1">
+                <line x1="0" y1="30" x2="300" y2="30" stroke-dasharray="4"/>
+                <line x1="0" y1="70" x2="300" y2="70" stroke-dasharray="4"/>
+                <line x1="0" y1="110" x2="300" y2="110" stroke-dasharray="4"/>
+              </g>
+
+              <rect id="bar-velocity" class="bar-rect" x="20" y="150" width="40" height="0" fill="#38bdf8" opacity="0.8" rx="2" />
+              <text id="val-velocity" x="40" y="145" text-anchor="middle" class="font-mono text-[10px] fill-white data-text">0</text>
+              <text x="40" y="165" text-anchor="middle" class="font-mono text-[8px] fill-sky-500">VELOCITY</text>
+
+              <rect id="bar-fuel" class="bar-rect" x="90" y="150" width="40" height="0" fill="#f472b6" opacity="0.8" rx="2" />
+              <text id="val-fuel" x="110" y="145" text-anchor="middle" class="font-mono text-[10px] fill-white data-text">0</text>
+              <text x="110" y="165" text-anchor="middle" class="font-mono text-[8px] fill-fuchsia-500">FUEL</text>
+
+              <rect id="bar-distance" class="bar-rect" x="160" y="150" width="40" height="0" fill="#818cf8" opacity="0.8" rx="2" />
+              <text id="val-distance" x="180" y="145" text-anchor="middle" class="font-mono text-[10px] fill-white data-text">0</text>
+              <text x="180" y="165" text-anchor="middle" class="font-mono text-[8px] fill-indigo-500">DIST</text>
+
+              <rect id="bar-temp" class="bar-rect" x="230" y="150" width="40" height="0" fill="#fb923c" opacity="0.8" rx="2" />
+              <text id="val-temp" x="250" y="145" text-anchor="middle" class="font-mono text-[10px] fill-white data-text">0</text>
+              <text x="250" y="165" text-anchor="middle" class="font-mono text-[8px] fill-orange-500">TEMP</text>
+            </svg>
+          </div>
+
+          <div class="mt-8 pt-4 border-t border-slate-700/50 flex justify-between font-mono text-[10px] text-slate-400">
+            <span class="animate-pulse">● ACQUIRING SIGNAL</span>
+            <span>LAT: 28.5721° N</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="relative z-10 py-10 text-center font-mono text-xs text-slate-600">
+    NASA ARTEMIS MISSION CONTROL • AUTHORIZED PERSONNEL ONLY
+  </footer>
+
+  <script>
+    // --- 1. STARFIELD CANVAS (Warp Effect) ---
+    const canvas = document.getElementById('starfield');
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    let stars = [];
+    const starCount = 400;
+    let speed = 0.5; // Base speed
+    let scrollY = 0;
+
+    function resize() {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    }
+
+    class Star {
+      constructor() {
+        this.reset(true);
+      }
+      reset(initial = false) {
+        this.x = (Math.random() - 0.5) * width * 2; // Wide spread
+        this.y = (Math.random() - 0.5) * height * 2;
+        this.z = initial ? Math.random() * 1000 : 1000;
+        this.size = Math.random() * 2;
+      }
+      update() {
+        // Warp speed effect based on scroll
+        let currentSpeed = speed + (scrollY * 0.05); 
+        this.z -= currentSpeed;
+        
+        if (this.z <= 1) this.reset();
+      }
+      draw() {
+        const x = (this.x / this.z) * 200 + width / 2;
+        const y = (this.y / this.z) * 200 + height / 2;
+        const s = (1000 - this.z) / 1000 * this.size * 2;
+        
+        // Parallax offset
+        const parallaxY = scrollY * 0.1;
+
+        ctx.fillStyle = `rgba(255, 255, 255, ${(1000 - this.z) / 1000})`;
+        ctx.beginPath();
+        ctx.arc(x, y - parallaxY, s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function initStars() {
+      resize();
+      for(let i=0; i<starCount; i++) stars.push(new Star());
+      animateStars();
+    }
+
+    function animateStars() {
+      ctx.fillStyle = 'rgba(2, 6, 23, 0.4)'; // Trails effect
+      ctx.fillRect(0, 0, width, height);
+      stars.forEach(star => { star.update(); star.draw(); });
+      requestAnimationFrame(animateStars);
+    }
+
+    window.addEventListener('resize', resize);
+    window.addEventListener('scroll', () => { scrollY = window.scrollY; });
+    initStars();
+
+    // --- 2. DATA SCRAMBLER EFFECT (Matrix style numbers) ---
+    function animateValue(obj, end, duration) {
+      let startTimestamp = null;
+      const originalText = obj.innerHTML;
+      
+      const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        
+        // While animating, show random numbers
+        if (progress < 1) {
+          obj.innerHTML = Math.floor(Math.random() * 999); 
+        } else {
+          obj.innerHTML = end; // Final value
+        }
+        
+        if (progress < 1) {
+          window.requestAnimationFrame(step);
+        }
+      };
+      window.requestAnimationFrame(step);
+    }
+
+    // --- 3. SCROLLYTELLING LOGIC ---
+    // Define data for each phase
+    const phaseData = {
+      launch: { v: 24500, f: 98, d: 200, t: 850, colors: ['#38bdf8', '#f472b6', '#818cf8', '#fb923c'] }, // Fast, full fuel, hot
+      orbit: { v: 3200, f: 65, d: 384000, t: -120, colors: ['#a855f7', '#f472b6', '#818cf8', '#60a5fa'] }, // Slow, deep space cold
+      surface: { v: 0, f: 40, d: 384400, t: -230, colors: ['#6366f1', '#f472b6', '#818cf8', '#94a3b8'] }, // Stopped, cold
+      return: { v: 40000, f: 5, d: 1000, t: 2760, colors: ['#fb923c', '#f472b6', '#818cf8', '#ef4444'] } // Super fast, hot
+    };
+
+    const cards = document.querySelectorAll('.phase-card');
+    const chartBars = {
+      v: document.getElementById('bar-velocity'),
+      f: document.getElementById('bar-fuel'),
+      d: document.getElementById('bar-distance'),
+      t: document.getElementById('bar-temp')
+    };
+    const chartVals = {
+      v: document.getElementById('val-velocity'),
+      f: document.getElementById('val-fuel'),
+      d: document.getElementById('val-distance'),
+      t: document.getElementById('val-temp')
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          // Visual: Highlight Active Card
+          cards.forEach(c => c.classList.remove('active'));
+          entry.target.classList.add('active');
+
+          // Data: Update Chart
+          const phase = entry.target.dataset.phase;
+          const data = phaseData[phase];
+
+          if (data) {
+            // Update Bar Heights (Normalize somewhat for visual)
+            chartBars.v.setAttribute('height', Math.min(data.v / 300, 120));
+            chartBars.v.setAttribute('y', 150 - Math.min(data.v / 300, 120));
+            chartBars.v.setAttribute('fill', data.colors[0]);
+
+            chartBars.f.setAttribute('height', data.f); // % directly
+            chartBars.f.setAttribute('y', 150 - data.f);
+            
+            chartBars.d.setAttribute('height', Math.min(data.d / 3500, 120));
+            chartBars.d.setAttribute('y', 150 - Math.min(data.d / 3500, 120));
+
+            chartBars.t.setAttribute('height', Math.min(Math.abs(data.t) / 30, 120));
+            chartBars.t.setAttribute('y', 150 - Math.min(Math.abs(data.t) / 30, 120));
+            chartBars.t.setAttribute('fill', data.colors[3]);
+
+            // Scramble Numbers
+            animateValue(chartVals.v, data.v, 600);
+            animateValue(chartVals.f, data.f + '%', 600);
+            animateValue(chartVals.d, (data.d / 1000).toFixed(1) + 'k', 600);
+            animateValue(chartVals.t, data.t + '°C', 600);
+          }
+        }
+      });
+    }, {
+      threshold: 0.6, // Trigger when 60% visible
+      rootMargin: "-10% 0px -10% 0px"
+    });
+
+    cards.forEach(card => observer.observe(card));
+
+    // --- 4. MET TIMER (Mission Elapsed Time) ---
+    const timerEl = document.getElementById('met-timer');
+    let seconds = 0;
+    setInterval(() => {
+      seconds++;
+      const date = new Date(0);
+      date.setSeconds(seconds);
+      timerEl.innerText = date.toISOString().substr(11, 8);
+    }, 1000);
+
+  </script>
+</body>
+</html>
